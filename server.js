@@ -10,13 +10,13 @@ var mongoose    = require('mongoose');
 var jwt    = require('jsonwebtoken'); // used to create, sign, and verify tokens
 var config = require('./config'); // get our config file
 var User   = require('./app/models/user'); // get our mongoose model
+var mid    = require('./middleware/middleware')
     
 // =======================
 // configuration =========
 // =======================
 var port = process.env.PORT || 8080; // used to create, sign, and verify tokens
 mongoose.connect(config.database); // connect to database
-app.set('superSecret', config.secret); // secret variable
 
 // use body parser so we can get info from POST and/or URL parameters
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -24,6 +24,13 @@ app.use(bodyParser.json());
 
 // use morgan to log requests to the console
 app.use(morgan('dev'));
+
+//enable CORS
+app.use(function(req, res, next) {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+    next();
+});
 
 // =======================
 // routes ================
@@ -42,116 +49,17 @@ apiRoutes.get('/register', function(req, res, next) {
 	return res.send('register today!');
 });
 
-//POST /register route to register new user
-apiRoutes.post('/register', function(req, res, next) {
-	if ( req.body.email &&
-		 req.body.fullName &&
-		 req.body.username &&
-		 req.body.password &&
-		 req.body.confirmPassword) {
-
-		//confirm that the user typed same password twice
-	if (req.body.password !== req.body.confirmPassword) {
-		var err = new Error('Passwords do not match.');
-		err.status = 400;
-		return next(err);
-	}
-
-//create object with form input
-	var userData = {
-		email: req.body.email,
-		fullName: req.body.fullName,
-		username: req.body.username,
-		password: req.body.password,
-		confirmPassword: req.body.confirmPassword
-	};
-
-//use schema's 'create' method to insert document into mongo
-	User.create(userData, function (error, user) {
-		if (error) {
-			return next(error);
-		} 
-	});
-	
-	} else {
-		var err = new Error('All fields required.');
-		err.status = 400;
-		return next(err);
-	}
-})
-
-// route to authenticate a user (POST http://localhost:8080/api/authenticate)
-apiRoutes.post('/authenticate', function(req, res, next) {
-
-    if (req.body.email && req.body.password) {
-        User.authenticate(req.body.email, req.body.password, function(error, user) {
-            if (error || !user) {
-                var err = new Error('Wrong email or password.');
-                err.status = 401;
-                return next(err);
-            } else {
-                // if user is found and password is right
-                // create a token
-                var token = jwt.sign(user, app.get('superSecret'), {
-                    expiresIn: 1440 // expires in 24 hours
-                });
-
-                // return the information including token as JSON
-                res.json({
-                    success: true,
-                    message: 'Enjoy your token!',
-                    token: token
-                });
-            }
-        });
-    } else {
-        var err = new Error('Email and password are required.');
-        err.status = 401;
-        return next(err);
-    }
-});
-
-
-// route middleware to verify a token
-apiRoutes.use(function(req, res, next) {
-
-  // check header or url parameters or post parameters for token
-  var token = req.body.token || req.query.token || req.headers['x-access-token'];
-
-  // decode token
-  if (token) {
-
-    // verifies secret and checks exp
-    jwt.verify(token, app.get('superSecret'), function(err, decoded) {      
-      if (err) {
-        return res.json({ success: false, message: 'Failed to authenticate token.' });    
-      } else {
-        // if everything is good, save to request for use in other routes
-        req.decoded = decoded;    
-        next();
-      }
-    });
-
-  } else {
-
-    // if there is no token
-    // return an error
-    return res.status(403).send({ 
-        success: false, 
-        message: 'No token provided.' 
-    });
-    
-  }
-});
-
+// auth routes with login and register methods
+var authRoutes = require('./routes/authRoutes');
+app.use('/api', authRoutes);
 
 // route to show a random message (GET http://localhost:8080/api/)
-apiRoutes.get('/', function(req, res) {
+apiRoutes.get('/', mid.requiresToken, function(req, res) {
   res.json({ message: 'Welcome to the coolest API on earth!' });
 });
 
 // route to return all users (GET http://localhost:8080/api/users)
-apiRoutes.get('/users', function(req, res) {
+apiRoutes.get('/users', mid.requiresToken, function(req, res) {
   User.find({}, function(err, users) {
     res.json(users);
   });
